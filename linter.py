@@ -20,13 +20,10 @@ from .addict import Dict
 class Rust(Linter):
     """Provides an interface to Rust linting."""
 
-    defaults = {
-        'cargo-command': 'clippy',
-    }
+    defaults = {'cargo-command': 'clippy'}
     syntax = ('rust', 'rustenhanced')
-    regex = r'.*'
-
-    cargo_command = 'clippy'
+    regex = r'^\{.*\}$'
+    executable = 'cargo'
 
     def get_chdir(self, settings):
         """Find the chdir to use with the linter."""
@@ -38,22 +35,44 @@ class Rust(Linter):
 
         return os.path.dirname(cargo_config)
 
-    def cmd(self, cmd, code):
-        cmd = self.get_view_settings().get('cargo-command', self.cargo_command)
+    def cmd(self):
+        cmd = self.get_view_settings().get('cargo-command', self.defaults['cargo-command'])
 
-        return ['cargo'] + cmd + ['--message-format', 'json']
+        return ['cargo', cmd, '--message-format', 'json']
+
+    def error(self, line, col, message, error_type):
+        if isinstance(message, (list, set, tuple)):
+            for m in message:
+                super().error(line, col, m, error_type)
+        else:
+            super().error(line, col, message, error_type)
 
     def split_match(self, match):
+        if not match:
+            return match, None, None, None, None, '', None
+
         output = Dict(json.loads(match.group()))
 
         if not os.path.samefile(output.target.src_path, self.filename):
             return match, None, None, None, None, '', None
 
+        output = output.message
         error = output.level == 'error'
         warning = not error
-        message = output.message + '\n\t' + '\n\t'.join(c.message for c in output.children if c.message)
-        line = output.spans[0].line_start
-        col = output.spans[0].column_start
-        near = '\n'.join(c.text for c in output.spans[0].text)
+        messages = [output.message, '']
+        if output.spans[0].label:
+            messages.append(('\t' * 2) + output.spans[0].label)
+        messages += [('\t' * 4) + c.message for c in output.children if c.message]
 
-        return match, line, col, error, warning, message, near
+        line = output.spans[0].line_start or None
+        if line:
+            line -= 1
+
+        col = output.spans[0].column_start or None
+        if col:
+            col -= 1
+
+        near = output.spans[0].text[0]
+        near = near.text[near.highlight_start:near.highlight_end]
+
+        return match, line, col, error, warning, messages, near
