@@ -48,31 +48,39 @@ class Rust(Linter):
             super().error(line, col, message, error_type)
 
     def split_match(self, match):
+        null_match = match, None, None, None, None, '', None
         if not match:
-            return match, None, None, None, None, '', None
+            return null_match
 
         output = Dict(json.loads(match.group()))
 
-        if not os.path.samefile(output.target.src_path, self.filename):
-            return match, None, None, None, None, '', None
+        try:
+            file = os.path.join(self.get_chdir(None), output.message.spans[0].file_name)
+            if not os.path.samefile(file, self.filename):
+                return null_match
+        except:
+            return null_match
 
         output = output.message
         error = output.level == 'error'
         warning = not error
-        messages = [output.message, '']
-        if output.spans[0].label:
-            messages.append(('\t' * 2) + output.spans[0].label)
-        messages += [('\t' * 4) + c.message for c in output.children if c.message]
+        messages = [output.message, ''] + [('\t' * 4) + c.message for c in output.children if c.message]
+        line = None
+        col = None
+        near = None
+        if output.spans:
+            if output.spans[0].label:
+                messages.append(('\t' * 2) + output.spans[0].label)
 
-        line = output.spans[0].line_start or None
-        if line:
-            line -= 1
+            line = output.spans[0].line_start or None
+            if line:
+                line -= 1
 
-        col = output.spans[0].column_start or None
-        if col:
-            col -= 1
+            col = output.spans[0].column_start or None
+            if col:
+                col -= 1
 
-        near = output.spans[0].text[0]
-        near = near.text[near.highlight_start:near.highlight_end]
+            near = output.spans[0].text[0]
+            near = near.text and near.text[near.highlight_start:near.highlight_end]
 
-        return match, line, col, error, warning, messages, near
+        return match, line, col, error, warning, messages, near or None
